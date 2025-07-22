@@ -22,6 +22,15 @@ interface Employee {
   department: string;
 }
 
+interface SystemEvent {
+  id: string;
+  siteId: number;
+  type: 'emergency_call' | 'guard_on' | 'guard_off' | 'alarm';
+  timestamp: string;
+  source: 'admin' | 'client';
+  message: string;
+}
+
 const Index = () => {
   const [currentView, setCurrentView] = useState<'auth' | 'admin' | 'client'>('auth');
   const [adminPassword, setAdminPassword] = useState('');
@@ -30,6 +39,7 @@ const Index = () => {
   const [sites, setSites] = useState<SecuritySite[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [selectedSites, setSelectedSites] = useState<number[]>([]);
+  const [systemEvents, setSystemEvents] = useState<SystemEvent[]>([]);
   const [alarmSound] = useState(new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBSaFy/LWgyQBFl.'));
 
   // Генерируем начальные данные для 400 участков
@@ -80,12 +90,40 @@ const Index = () => {
     }
   };
 
-  const updateSiteStatus = (siteId: number, newStatus: SecuritySite['status']) => {
+  const updateSiteStatus = (siteId: number, newStatus: SecuritySite['status'], source: 'admin' | 'client' = 'admin') => {
     setSites(prev => prev.map(site => 
       site.id === siteId 
         ? { ...site, status: newStatus, lastActivity: new Date().toLocaleString() }
         : site
     ));
+    
+    // Добавляем событие в систему
+    const eventTypes = {
+      'emergency': 'emergency_call' as const,
+      'guarded': 'guard_on' as const,
+      'not_guarded': 'guard_off' as const,
+      'alarm': 'alarm' as const
+    };
+    
+    if (eventTypes[newStatus]) {
+      const newEvent: SystemEvent = {
+        id: Date.now().toString(),
+        siteId,
+        type: eventTypes[newStatus],
+        timestamp: new Date().toLocaleString(),
+        source,
+        message: `Участок №${siteId} - ${getStatusText(newStatus)}${source === 'client' ? ' (клиент)' : ''}`
+      };
+      
+      setSystemEvents(prev => [newEvent, ...prev].slice(0, 100)); // Храним последние 100 событий
+      
+      // Воспроизводим звук для критических событий
+      if (newStatus === 'emergency' || newStatus === 'alarm') {
+        try {
+          alarmSound.play().catch(() => {});
+        } catch (e) {}
+      }
+    }
   };
 
   const getStatusColor = (status: SecuritySite['status']) => {
@@ -201,7 +239,7 @@ const Index = () => {
               <CardContent className="space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                   <Button
-                    onClick={() => updateSiteStatus(clientSite.id, 'guarded')}
+                    onClick={() => updateSiteStatus(clientSite.id, 'guarded', 'client')}
                     className="bg-green-600 hover:bg-green-700"
                     disabled={clientSite.status === 'guarded'}
                   >
@@ -210,7 +248,7 @@ const Index = () => {
                   </Button>
                   
                   <Button
-                    onClick={() => updateSiteStatus(clientSite.id, 'not_guarded')}
+                    onClick={() => updateSiteStatus(clientSite.id, 'not_guarded', 'client')}
                     variant="secondary"
                     disabled={clientSite.status === 'not_guarded'}
                   >
@@ -219,7 +257,7 @@ const Index = () => {
                   </Button>
                   
                   <Button
-                    onClick={() => updateSiteStatus(clientSite.id, 'emergency')}
+                    onClick={() => updateSiteStatus(clientSite.id, 'emergency', 'client')}
                     className="bg-red-600 hover:bg-red-700"
                   >
                     <Icon name="AlertTriangle" className="h-4 w-4 mr-2" />
@@ -316,7 +354,7 @@ const Index = () => {
               </Card>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               <Card>
                 <CardHeader>
                   <CardTitle>Реквизиты ГБР</CardTitle>
@@ -353,6 +391,42 @@ const Index = () => {
                         </Alert>
                       ))
                     }
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center">
+                    <Icon name="Activity" className="h-4 w-4 mr-2" />
+                    Журнал событий
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-2 max-h-64 overflow-y-auto">
+                    {systemEvents.slice(0, 10).map(event => (
+                      <div key={event.id} className="p-2 border rounded text-sm">
+                        <div className="flex justify-between items-center mb-1">
+                          <span className={`font-semibold ${
+                            event.type === 'emergency_call' ? 'text-red-600' :
+                            event.type === 'alarm' ? 'text-red-500' :
+                            event.type === 'guard_on' ? 'text-green-600' :
+                            'text-gray-600'
+                          }`}>
+                            {event.message}
+                          </span>
+                          <Badge variant={event.source === 'client' ? 'destructive' : 'secondary'}>
+                            {event.source === 'client' ? 'Клиент' : 'Админ'}
+                          </Badge>
+                        </div>
+                        <div className="text-xs text-gray-500">{event.timestamp}</div>
+                      </div>
+                    ))}
+                    {systemEvents.length === 0 && (
+                      <div className="text-center text-gray-500 text-sm py-4">
+                        Нет событий
+                      </div>
+                    )}
                   </div>
                 </CardContent>
               </Card>
